@@ -2,6 +2,7 @@ import os
 import time
 import random
 import requests
+import cloudscraper
 from datetime import datetime
 from requests.cookies import create_cookie
 
@@ -54,11 +55,33 @@ class OliveYoungCollector:
             "Cache-Control": "max-age=0",
             "Referer": "https://www.oliveyoung.co.kr/store/main/main.do",
         }
-        self.session = requests.Session()
-        self.session.headers.update(self.headers)
-        
-        # 쿠키 초기화
-        self._init_cookies()
+        # cloudscraper 세션 생성 (Cloudflare 자동 우회)
+        try:
+            self.session = cloudscraper.create_scraper(
+                browser={
+                    'browser': 'chrome',
+                    'platform': 'windows', 
+                    'desktop': True
+                },
+                delay=10,  # Cloudflare 챌린지 대기 시간
+                debug=False  # 디버그 정보 출력 여부
+            )
+            
+            # 헤더 업데이트
+            self.session.headers.update(self.headers)
+            
+            logger.info("cloudscraper 세션 생성 완료")
+            
+            # 쿠키 초기화 (간소화된 버전)
+            self._init_cookies()
+            
+        except Exception as e:
+            logger.error(f"cloudscraper 세션 생성 실패: {str(e)}")
+            # 폴백: 일반 requests 세션 사용
+            logger.warning("일반 requests 세션으로 폴백")
+            self.session = requests.Session()
+            self.session.headers.update(self.headers)
+            self._init_cookies_fallback()
         
         logger.info("OliveYoungCollector 초기화 완료")
     
@@ -100,6 +123,26 @@ class OliveYoungCollector:
             logger.error(f"쿠키 초기화 중 오류 발생: {str(e)}")
             raise
     
+    def _init_cookies_fallback(self):
+        """
+        일반 requests 세션을 위한 fallback 쿠키 초기화 (AWS WAF Token 없이)
+        """
+        try:
+            logger.info("Fallback: 일반 requests 세션으로 메인 페이지 방문")
+            main_url = f"{OLIVEYOUNG_BASE_URL}/store/main/main.do"
+            
+            response = self._get_with_delay(main_url, timeout=REQUEST_TIMEOUT)
+            
+            if response.ok:
+                logger.info(f"Fallback: 메인 페이지 접속 성공. 쿠키 {len(self.session.cookies)}개 설정됨")
+            else:
+                logger.warning(f"Fallback: 메인 페이지 접속 실패: {response.status_code}")
+                
+        except Exception as e:
+            logger.error(f"Fallback 쿠키 초기화 중 오류 발생: {str(e)}")
+            # fallback도 실패할 경우 예외를 발생시키지 않고 계속 진행
+            logger.warning("Fallback 쿠키 초기화 실패, 쿠키 없이 진행")
+    
     def _get_with_delay(self, url, **kwargs):
         """
         요청 전 랜덤 지연을 추가하고 응답 코드를 확인하는 session.get 래퍼 함수
@@ -112,7 +155,7 @@ class OliveYoungCollector:
             requests.Response: 응답 객체
             
         Raises:
-            RuntimeError: AWS WAF 캡차가 발생한 경우 (응답 코드 405)
+            RuntimeError: Cloudflare 챌린지 실패 또는 서버 오류가 발생한 경우
         """
         # 요청 전 랜덤 딜레이 추가 (2~4초)
         delay = random.uniform(2.0, 3.0)
@@ -122,10 +165,14 @@ class OliveYoungCollector:
         # 요청 수행
         response = self.session.get(url, **kwargs)
         
-        # AWS WAF 캡차 확인 (응답 코드 405)
-        if response.status_code == 405:
-            logger.error(f"AWS WAF 캡차가 발생했습니다. URL: {url}")
-            raise RuntimeError("AWS WAF 캡차가 발생했습니다. 토큰을 업데이트하세요.")
+        # Cloudflare 또는 서버 오류 확인
+        if response.status_code in [403, 503, 405]:
+            error_msg = f"Cloudflare 챌린지 실패 또는 서버 오류 (HTTP {response.status_code}): {url}"
+            logger.error(error_msg)
+            raise RuntimeError(error_msg)
+        elif response.status_code == 429:
+            logger.error(f"Rate limiting 발생: {url}")
+            raise RuntimeError("너무 많은 요청으로 인한 일시적 차단. 잠시 후 재시도하세요.")
             
         return response
     
@@ -151,8 +198,15 @@ class OliveYoungCollector:
                 if attempt == max_retry:
                     logger.error(f"재시도 {attempt}회 실패: {e}")
                     raise
-                backoff = base_delay * (2 ** (attempt-1)) + random.uniform(1, 3)
-                logger.warning(f"[Retry {attempt}/{max_retry}] {backoff:.1f}s 후 재시도: {e}")
+                
+                # Rate limiting의 경우 더 긴 대기 시간 적용
+                if "Rate limiting" in str(e) or "429" in str(e):
+                    backoff = base_delay * (3 ** attempt) + random.uniform(5, 10)  # 더 긴 대기
+                    logger.warning(f"[Rate Limit Retry {attempt}/{max_retry}] {backoff:.1f}s 후 재시도: {e}")
+                else:
+                    backoff = base_delay * (2 ** (attempt-1)) + random.uniform(1, 3)
+                    logger.warning(f"[Retry {attempt}/{max_retry}] {backoff:.1f}s 후 재시도: {e}")
+                
                 time.sleep(backoff)
     
     def collect_goods_numbers(self, category_id, sort_type=None):
