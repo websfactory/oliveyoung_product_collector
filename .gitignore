@@ -2,6 +2,7 @@ __pycache__/
 .env
 .pyc
 .vscode/
-.reports/
+reports/
 error_logs/
 new_cookies_setting_code.txt
+.claude
