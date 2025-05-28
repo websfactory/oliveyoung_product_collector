@@ -1,6 +1,12 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+# .env 파일 로드
+BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / '.env')
 
 # 데이터베이스 설정
 HOSTNAME = os.getenv('HOSTNAME')
