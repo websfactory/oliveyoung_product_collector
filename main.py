@@ -8,7 +8,16 @@ from sqlalchemy.exc import OperationalError, SQLAlchemyError
 
 from config.session import CosmeticsSession
 from models.database import CosmeticsCategory
-from collectors.oliveyoung_collector import OliveYoungCollector
+# Collector 선택 (기본: curl-cffi 버전)
+# VS Code 디버그 모드에서는 직접 수정하여 사용
+USE_CURL_CFFI = True  # True: curl-cffi 버전, False: 기존 cloudscraper 버전
+
+if USE_CURL_CFFI:
+    from collectors.oliveyoung_collector_curl import OliveYoungCollectorCurl as OliveYoungCollector
+    print("[INFO] curl-cffi 수집기 사용")
+else:
+    from collectors.oliveyoung_collector import OliveYoungCollector
+    print("[INFO] 기본 수집기 사용")
 from api.ingredient_api import IngredientAPI
 from api.product_api import ProductAPI
 from utils.logger import setup_logger
@@ -178,7 +187,14 @@ def collect_today_categories():
     product_api = ProductAPI()
     
     # 수집기 초기화
-    collector = OliveYoungCollector(ingredient_api, product_api)
+    try:
+        collector = OliveYoungCollector(ingredient_api, product_api)
+        print(f"[INFO] 수집기 초기화 완료: {collector.__class__.__name__}")
+        logger.info(f"수집기 초기화 완료: {collector.__class__.__name__}")
+    except Exception as e:
+        print(f"[ERROR] 수집기 초기화 실패: {str(e)}")
+        logger.error(f"수집기 초기화 실패: {str(e)}")
+        raise
     
     # 실패한 카테고리 목록 초기화
     failed_categories = []

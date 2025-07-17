@@ -7,6 +7,7 @@ cryptography==41.0.5
 requests==2.31.0
 aiohttp==3.8.6
 cloudscraper==1.2.71
+curl-cffi==0.7.3  # TLS Fingerprinting 우회
 
 # HTML 파싱
 beautifulsoup4==4.12.2
