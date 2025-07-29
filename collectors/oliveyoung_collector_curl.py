@@ -142,8 +142,8 @@ class OliveYoungCollectorCurl:
         Raises:
             RuntimeError: Cloudflare 챌린지 실패 또는 서버 오류가 발생한 경우
         """
-        # 요청 전 랜덤 딜레이 추가 (2~4초로 증가)
-        delay = random.uniform(2.0, 4.0)
+        # 요청 전 랜덤 딜레이 추가 (2~3초로 증가)
+        delay = random.uniform(1.0, 3.0)
         logger.info(f"요청 전 {delay:.2f}초 대기: {url}")
         time.sleep(delay)
         
@@ -179,7 +179,7 @@ class OliveYoungCollectorCurl:
             requests.Response: 응답 객체
         """
         # 요청 전 랜덤 딜레이 추가
-        delay = random.uniform(2.0, 4.0)
+        delay = random.uniform(1.0, 3.0)
         logger.info(f"POST 요청 전 {delay:.2f}초 대기: {url}")
         time.sleep(delay)
         
@@ -304,7 +304,7 @@ class OliveYoungCollectorCurl:
                 goods_numbers.extend(page_goods_numbers)
                 
                 # 과도한 요청 방지를 위한 지연 
-                time.sleep(random.uniform(2.0, 4.0))
+                time.sleep(random.uniform(1.0, 3.0))
             
             return goods_numbers
             
@@ -539,7 +539,7 @@ class OliveYoungCollectorCurl:
                 self.enrich_product_with_ingredients(product, item_no)
                 
                 # 요청 간 지연 추가
-                time.sleep(random.uniform(2, 4))
+                time.sleep(random.uniform(1, 3))
         
         logger.info(f"{len(products)}개 제품의 성분 정보 처리 완료")
     
