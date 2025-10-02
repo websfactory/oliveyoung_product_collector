@@ -6,6 +6,7 @@ import time  # time 모듈 추가
 from datetime import datetime
 from sqlalchemy import select, update, and_
 from sqlalchemy.exc import SQLAlchemyError
+from collections import Counter
 
 from models.database import CosmeticsProductsHistoryRetries
 from retry.utils import get_current_iso_week, get_previous_iso_week, find_missing_products
@@ -61,7 +62,13 @@ class RetryManager:
                 logger.info("지난 주 대비 누락된 제품이 없습니다.")
                 return {"success": True, "success_count": 0, "fail_count": 0, "message": "누락된 제품 없음"}
             
-            logger.info(f"총 {len(missing_products)}개의 누락된 제품에 대한 재시도를 시작합니다.")
+            print(f"총 {len(missing_products)}개의 누락된 제품에 대한 재시도를 시작합니다.")
+            
+            # 카테고리별 누락 제품 수 집계 및 상위 3개 출력
+            category_counts = Counter(p['disp_cat_no'] for p in missing_products)
+            top_categories = category_counts.most_common(3)
+            for cat_no, count in top_categories:
+                print(f"  - 카테고리 {cat_no}: {count}개 누락")
             
             # 3. 재시도 테이블에 레코드 생성
             self._create_retry_records(missing_products, current_year, current_week)

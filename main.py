@@ -21,6 +21,7 @@ else:
 from api.ingredient_api import IngredientAPI
 from api.product_api import ProductAPI
 from utils.logger import setup_logger
+from utils.webshare_proxy import get_webshare_proxy_manager
 from config.settings import DEBUG
 
 # 로거 설정
@@ -171,11 +172,76 @@ def process_category(collector, category, session, failed_categories=None):
             'category_name': category_name
         }
 
-def collect_today_categories():
+def select_proxy_mode():
+    """
+    프록시 사용 여부 선택 메뉴
+    
+    Returns:
+        bool: 프록시 사용 여부
+    """
+    print("\n=== 올리브영 수집기 설정 ===")
+    print("1. 로컬 연결 사용 (기본)")
+    print("2. Webshare 프록시 사용")
+    print("3. 프록시 연결 테스트")
+    print("0. 종료")
+    
+    while True:
+        choice = input("\n옵션을 선택하세요 (0-3): ").strip()
+        
+        if choice == '0':
+            print("프로그램을 종료합니다.")
+            sys.exit(0)
+        elif choice == '1':
+            print("\n[INFO] 로컬 연결을 사용합니다.")
+            return False
+        elif choice == '2':
+            print("\n[INFO] Webshare 프록시를 사용합니다.")
+            return True
+        elif choice == '3':
+            test_proxy_connection()
+            # 테스트 후 다시 메뉴 표시
+            continue
+        else:
+            print("\n[ERROR] 잘못된 선택입니다. 다시 선택해주세요.")
+
+def test_proxy_connection():
+    """
+    프록시 연결 테스트
+    """
+    print("\n=== 프록시 연결 테스트 ===")
+    
+    try:
+        proxy_manager = get_webshare_proxy_manager()
+        print("프록시 매니저 초기화 성공")
+        
+        # 프록시 정보 표시
+        proxy_info = proxy_manager.get_proxy_info()
+        print(f"\n프록시 상태:")
+        print(f"- 전체 프록시: {proxy_info['total_proxies']}개")
+        print(f"- 유효한 프록시: {proxy_info['valid_proxies']}개")
+        print(f"- 실패한 프록시: {proxy_info['failed_proxies']}개")
+        
+        # 프록시 테스트
+        print("\n프록시 연결 테스트 중...")
+        if proxy_manager.test_proxy():
+            print("[✓] 프록시 연결 테스트 성공!")
+        else:
+            print("[✗] 프록시 연결 테스트 실패")
+            
+    except Exception as e:
+        print(f"\n[ERROR] 프록시 테스트 중 오류 발생: {e}")
+    
+    input("\n계속하려면 Enter키를 누르세요...")
+
+def collect_today_categories(use_proxy=False):
     """
     오늘 작업할 카테고리 수집 실행
+    
+    Args:
+        use_proxy (bool): 프록시 사용 여부
     """
     logger.info("올리브영 제품 수집 프로그램 시작")
+    logger.info(f"프록시 사용: {'Yes' if use_proxy else 'No'}")
     start_time = datetime.now()
     
     # 오늘 요일 계산 (1~7: 월~일)
@@ -186,11 +252,17 @@ def collect_today_categories():
     ingredient_api = IngredientAPI()
     product_api = ProductAPI()
     
-    # 수집기 초기화
+    # 수집기 초기화 (프록시 옵션 포함)
     try:
-        collector = OliveYoungCollector(ingredient_api, product_api)
+        collector = OliveYoungCollector(ingredient_api, product_api, use_proxy=use_proxy)
         print(f"[INFO] 수집기 초기화 완료: {collector.__class__.__name__}")
         logger.info(f"수집기 초기화 완료: {collector.__class__.__name__}")
+        
+        # 프록시 사용 시 프록시 정보 표시
+        if use_proxy and hasattr(collector, 'proxy_manager') and collector.proxy_manager:
+            proxy_info = collector.proxy_manager.get_proxy_info()
+            logger.info(f"프록시 정보: {proxy_info}")
+            
     except Exception as e:
         print(f"[ERROR] 수집기 초기화 실패: {str(e)}")
         logger.error(f"수집기 초기화 실패: {str(e)}")
@@ -377,12 +449,30 @@ def reset_category_status():
 if __name__ == "__main__":
     try:
         # 커맨드라인 인자 확인
-        if len(sys.argv) > 1 and sys.argv[1] == "--reset":
-            # 카테고리 상태 초기화 모드
-            reset_category_status()
+        if len(sys.argv) > 1:
+            if sys.argv[1] == "--reset":
+                # 카테고리 상태 초기화 모드
+                reset_category_status()
+            elif sys.argv[1] == "--proxy":
+                # 커맨드라인에서 프록시 사용 지정
+                print("[INFO] 커맨드라인 옵션: 프록시 사용")
+                collect_today_categories(use_proxy=True)
+            elif sys.argv[1] == "--local":
+                # 커맨드라인에서 로컬 사용 지정
+                print("[INFO] 커맨드라인 옵션: 로컬 연결")
+                collect_today_categories(use_proxy=False)
+            else:
+                print(f"[ERROR] 알 수 없는 옵션: {sys.argv[1]}")
+                print("\n사용법:")
+                print("  python main.py              # 인터랙티브 모드")
+                print("  python main.py --local      # 로컬 연결 사용")
+                print("  python main.py --proxy      # 프록시 사용")
+                print("  python main.py --reset      # 카테고리 상태 초기화")
+                sys.exit(1)
         else:
-            # 일반 수집 모드
-            collect_today_categories()
+            # 인터랙티브 모드 - 사용자가 선택
+            use_proxy = select_proxy_mode()
+            collect_today_categories(use_proxy=use_proxy)
     except KeyboardInterrupt:
         logger.info("사용자에 의해 프로그램 중단")
     except Exception as e:

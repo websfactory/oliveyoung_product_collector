@@ -15,6 +15,7 @@ from config.settings import (
 )
 from utils.logger import setup_logger
 from utils.html_parser import OliveYoungParser
+from utils.webshare_proxy import get_webshare_proxy_manager
 from api.ingredient_api import IngredientAPI
 from api.product_api import ProductAPI
 from models.database import CosmeticsCategory
@@ -29,17 +30,31 @@ class OliveYoungCollectorCurl:
     TLS Fingerprinting 우회를 위해 Safari 브라우저로 위장
     """
     
-    def __init__(self, ingredient_api=None, product_api=None):
+    def __init__(self, ingredient_api=None, product_api=None, use_proxy=False):
         """
         OliveYoungCollectorCurl 생성자
         
         Args:
             ingredient_api (IngredientAPI, optional): 성분 분석 API 클라이언트. 기본값은 None(새로 생성).
             product_api (ProductAPI, optional): 제품 정보 저장 API 클라이언트. 기본값은 None(새로 생성).
+            use_proxy (bool, optional): Webshare 프록시 사용 여부. 기본값은 False.
         """
         self.ingredient_api = ingredient_api or IngredientAPI()
         self.product_api = product_api or ProductAPI()
         self.products = []
+        self.use_proxy = use_proxy
+        self.proxy_manager = None
+        self.current_proxy = None
+        
+        # 프록시 사용 시 초기화
+        if self.use_proxy:
+            try:
+                self.proxy_manager = get_webshare_proxy_manager()
+                logger.info("Webshare 프록시 매니저 초기화 완료")
+            except Exception as e:
+                logger.error(f"프록시 매니저 초기화 실패: {e}")
+                logger.warning("프록시 없이 계속 진행합니다")
+                self.use_proxy = False
         
         # Safari로 위장 (테스트 결과 성공한 브라우저)
         self.impersonate = "safari15_5"
@@ -151,6 +166,18 @@ class OliveYoungCollectorCurl:
         if headers is None:
             headers = self.headers
         
+        # 프록시 설정
+        if self.use_proxy and self.proxy_manager:
+            # 새 프록시 가져오기 (현재 프록시가 없거나 실패한 경우)
+            if not self.current_proxy:
+                self.current_proxy = self.proxy_manager.get_proxy_dict()
+                if self.current_proxy:
+                    logger.info("새 프록시 사용")
+                else:
+                    logger.warning("사용 가능한 프록시가 없습니다. 직접 연결 사용")
+            
+            kwargs['proxies'] = self.current_proxy
+        
         # 요청 수행
         response = self.session.get(url, headers=headers, **kwargs)
         
@@ -158,6 +185,13 @@ class OliveYoungCollectorCurl:
         if response.status_code in [403, 503, 405]:
             error_msg = f"Cloudflare 챌린지 실패 또는 서버 오류 (HTTP {response.status_code}): {url}"
             logger.error(error_msg)
+            
+            # 프록시 사용 중이면 실패한 프록시로 표시하고 새 프록시 시도
+            if self.use_proxy and self.current_proxy and self.proxy_manager:
+                logger.warning("현재 프록시 실패로 표시")
+                # 프록시를 실패로 표시하고 초기화
+                self.current_proxy = None
+            
             raise RuntimeError(error_msg)
         elif response.status_code == 429:
             logger.error(f"Rate limiting 발생: {url}")
@@ -187,6 +221,17 @@ class OliveYoungCollectorCurl:
         if headers is None:
             headers = self.headers
         
+        # 프록시 설정 (GET과 동일)
+        if self.use_proxy and self.proxy_manager:
+            if not self.current_proxy:
+                self.current_proxy = self.proxy_manager.get_proxy_dict()
+                if self.current_proxy:
+                    logger.info("새 프록시 사용 (POST)")
+                else:
+                    logger.warning("사용 가능한 프록시가 없습니다. 직접 연결 사용 (POST)")
+            
+            kwargs['proxies'] = self.current_proxy
+        
         # POST 요청 수행
         response = self.session.post(url, data=data, headers=headers, **kwargs)
         
@@ -194,6 +239,12 @@ class OliveYoungCollectorCurl:
         if response.status_code in [403, 503, 405]:
             error_msg = f"서버 오류 (HTTP {response.status_code}): {url}"
             logger.error(error_msg)
+            
+            # 프록시 사용 중이면 실패한 프록시로 표시
+            if self.use_proxy and self.current_proxy and self.proxy_manager:
+                logger.warning("현재 프록시 실패로 표시 (POST)")
+                self.current_proxy = None
+            
             raise RuntimeError(error_msg)
         elif response.status_code == 429:
             logger.error(f"Rate limiting 발생: {url}")
@@ -667,4 +718,10 @@ class OliveYoungCollectorCurl:
     def close(self):
         """세션 종료"""
         self.session.close()
+        
+        # 프록시 사용 통계 출력
+        if self.use_proxy and self.proxy_manager:
+            proxy_info = self.proxy_manager.get_proxy_info()
+            logger.info(f"프록시 사용 통계: {proxy_info}")
+        
         logger.info("수집기 세션 종료")
