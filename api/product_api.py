@@ -229,6 +229,7 @@ class ProductAPI:
                         item_no=product.get('item_no'),
                         product_url=product.get('product_url'),
                         brandId=brand_id,  # brand 필드 대신 brandId 사용
+                        manufacturer_info=product.get('manufacturer_info'),
                         name=product.get('name'),
                         image_url=product.get('image_url'),
                         price_original=product.get('price', {}).get('original'),

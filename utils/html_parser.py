@@ -295,22 +295,22 @@ class OliveYoungParser:
     def check_category_product_count(html_content):
         """
         카테고리 내 상품 개수 확인
-        
+
         Args:
             html_content (str): HTML 내용
-            
+
         Returns:
             int: 카테고리 내 상품 개수, 파싱 실패 시 -1 반환
         """
         try:
             soup = BeautifulSoup(html_content, 'html.parser')
-            
+
             # 카테고리 정보 텍스트 찾기
             cate_info = soup.select_one('p.cate_info_tx')
             if not cate_info:
                 logger.warning("카테고리 정보 텍스트를 찾을 수 없습니다")
                 return -1
-                
+
             # 상품 개수 추출
             count_span = cate_info.select_one('span')
             if count_span:
@@ -320,16 +320,49 @@ class OliveYoungParser:
                 except (ValueError, TypeError):
                     logger.warning(f"상품 개수를 숫자로 변환할 수 없습니다: {count_text}")
                     return -1
-            
+
             # 텍스트 전체에서 숫자 추출 시도
             text = cate_info.text.strip()
             match = re.search(r'(\d+)\s*개의 상품', text)
             if match:
                 return int(match.group(1))
-                
+
             logger.warning(f"상품 개수를 찾을 수 없습니다: {text}")
             return -1
-        
+
         except Exception as e:
             logger.error(f"카테고리 상품 개수 확인 중 오류 발생: {str(e)}")
             return -1
+
+    @staticmethod
+    def parse_manufacturer_info(html_content):
+        """
+        제품 상세 페이지에서 제조업자/책임판매업자 정보 추출
+
+        Args:
+            html_content (str): HTML 컨텐츠
+
+        Returns:
+            str: 제조업자/책임판매업자 정보 또는 None
+        """
+        try:
+            soup = BeautifulSoup(html_content, 'html.parser')
+
+            # detail_info_list 클래스를 가진 dl 태그들 찾기
+            detail_info_lists = soup.select('dl.detail_info_list')
+
+            for dl in detail_info_lists:
+                dt = dl.select_one('dt')
+                if dt and '화장품제조업자,화장품책임판매업자 및 맞춤형화장품판매업자' in dt.text:
+                    dd = dl.select_one('dd')
+                    if dd:
+                        manufacturer_info = dd.text.strip()
+                        logger.debug(f"제조업자 정보 추출 성공: {manufacturer_info}")
+                        return manufacturer_info
+
+            logger.warning("제조업자 정보를 찾을 수 없습니다")
+            return None
+
+        except Exception as e:
+            logger.error(f"제조업자 정보 파싱 중 오류 발생: {str(e)}")
+            return None

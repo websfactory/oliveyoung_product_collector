@@ -415,11 +415,11 @@ class OliveYoungCollectorCurl:
             # 메타 태그에서 정보 추출
             meta_info = OliveYoungParser.parse_meta_info(html)
             product_info.update(meta_info)
-            
+
             # 상세 페이지에서 평점 텍스트, 평점 퍼센트, 리뷰수
             detail_info = OliveYoungParser.parse_product_info(html)
             product_info.update(detail_info)
-            
+
             product_info['product_url'] = detail_url
             
             # item_no가 없으면 기본값 '001' 설정
@@ -483,69 +483,78 @@ class OliveYoungCollectorCurl:
     
     def enrich_product_with_ingredients(self, product, item_no='001'):
         """
-        제품의 성분 정보를 가져와서 분석 결과를 추가
-        
+        제품의 성분 정보 및 제조업자 정보를 가져와서 추가
+
         Args:
             product (dict): 성분 정보를 추가할 제품 객체
             item_no (str, optional): 아이템 번호. 기본값은 '001'.
         """
         try:
             goods_no = product.get('goods_no')
-            
+
             if not goods_no:
                 logger.warning("상품 번호가 없어 성분 정보를 수집할 수 없습니다")
                 return
-            
+
             logger.debug(f"제품 성분 정보 분석 시작: {goods_no}")
-            
-            # 성분 정보 수집 (동기식 메서드 호출)
-            ingredients = self.fetch_ingredients(goods_no, item_no)
-            
-            if not ingredients:
+
+            # 성분 및 제조업자 정보 수집 (동기식 메서드 호출)
+            result = self.fetch_ingredients(goods_no, item_no)
+
+            if not result:
                 logger.warning(f"제품 {goods_no}의 성분 정보를 찾을 수 없습니다")
                 return
-            
-            # 성분 정보 분석 API 호출 (동기식 메서드 사용)
-            analysis_result = self.ingredient_api.fetch_ingredients_info(ingredients, goods_no)
-            
-            # 분석 결과 처리
-            if analysis_result.get('status') == 'success' and analysis_result.get('data'):
-                logger.info(f"제품 {goods_no} 성분 분석 성공")
-                product['analysis'] = analysis_result.get('data')
-            else:
-                logger.warning(f"제품 {goods_no} 성분 분석 실패: {analysis_result.get('message')}")
-                product['analysis'] = {'error': analysis_result.get('message')}
-            
+
+            ingredients = result.get('ingredients')
+            manufacturer_info = result.get('manufacturer_info')
+
+            # 제조업자 정보를 제품에 추가
+            if manufacturer_info:
+                product['manufacturer_info'] = manufacturer_info
+
+            # 성분이 있는 경우에만 분석 API 호출
+            if ingredients:
+                # 성분 정보 분석 API 호출 (동기식 메서드 사용)
+                analysis_result = self.ingredient_api.fetch_ingredients_info(ingredients, goods_no)
+
+                # 분석 결과 처리
+                if analysis_result.get('status') == 'success' and analysis_result.get('data'):
+                    logger.info(f"제품 {goods_no} 성분 분석 성공")
+                    product['analysis'] = analysis_result.get('data')
+                else:
+                    logger.warning(f"제품 {goods_no} 성분 분석 실패: {analysis_result.get('message')}")
+                    product['analysis'] = {'error': analysis_result.get('message')}
+
         except Exception as e:
             logger.error(f"성분 정보 처리 중 오류: {str(e)}")
             product['analysis'] = {'error': str(e)}
     
     def fetch_ingredients(self, goods_no, item_no='001'):
         """
-        제품의 성분 정보 수집 - POST 메서드 사용
-        
+        제품의 성분 정보 및 제조업자 정보 수집 - POST 메서드 사용
+
         Args:
             goods_no (str): 상품 번호
             item_no (str, optional): 아이템 번호. 기본값은 '001'.
-            
+
         Returns:
-            str: 성분 정보 문자열 또는 None
+            dict: {'ingredients': str, 'manufacturer_info': str} 또는 None
         """
         try:
-            logger.debug(f"성분 정보 수집: {goods_no}, {item_no}")
-            
+            logger.debug(f"성분 및 제조업자 정보 수집: {goods_no}, {item_no}")
+
             # 폼 데이터 구성
             form_data = {
                 "goodsNo": goods_no,
                 "itemNo": item_no,
                 "pkgGoodsYn": "N"
             }
-            
+
             # AJAX 헤더 + Content-Type 설정
             headers = self.headers_ajax.copy()
             headers['Content-Type'] = 'application/x-www-form-urlencoded; charset=UTF-8'
             headers['Referer'] = f"{OLIVEYOUNG_BASE_URL}/goods/getGoodsDetail.do?goodsNo={goods_no}"
-            
+
             # POST 요청 (재시도 로직 추가)
             response = self._retry_request(
                 lambda: self._post_with_delay(
@@ -555,21 +564,32 @@ class OliveYoungCollectorCurl:
                     timeout=REQUEST_TIMEOUT
                 )
             )
-            
+
             if response.status_code != 200:
                 logger.error(f"성분 정보 API 호출 실패: {response.status_code}")
                 return None
-            
+
             # 성분 정보 추출
             ingredients = OliveYoungParser.parse_ingredients(response.text)
-            
+
+            # 제조업자 정보 추출 (같은 response에서)
+            manufacturer_info = OliveYoungParser.parse_manufacturer_info(response.text)
+
             if ingredients:
                 logger.debug(f"성분 정보 추출 성공 ({len(ingredients)} 글자)")
-                return ingredients
             else:
                 logger.warning(f"성분 정보를 찾을 수 없습니다: {goods_no}")
-                return None
-                    
+
+            if manufacturer_info:
+                logger.info(f"제조업자 정보 수집 완료: {manufacturer_info[:50]}{'...' if len(manufacturer_info) > 50 else ''}")
+            else:
+                logger.debug(f"제품 {goods_no}에 제조업자 정보가 없습니다")
+
+            return {
+                'ingredients': ingredients,
+                'manufacturer_info': manufacturer_info
+            }
+
         except Exception as e:
             logger.error(f"성분 정보 수집 중 오류: {str(e)}")
             return None

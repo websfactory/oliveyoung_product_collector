@@ -162,6 +162,7 @@ class CosmeticsProductHistory(Base):
     item_no = Column(String(20), nullable=True, comment='아이템 번호')
     product_url = Column(Text, nullable=False, comment='제품 URL')
     brandId = Column(Integer, nullable=True, comment='브랜드 ID', index=True)
+    manufacturer_info = Column(Text, nullable=True, comment='제조업자/책임판매업자 정보')
     name = Column(Text, nullable=False, comment='제품명')
     image_url = Column(Text, nullable=True, comment='이미지 URL')
     price_original = Column(Integer, nullable=True, comment='원래 가격')
