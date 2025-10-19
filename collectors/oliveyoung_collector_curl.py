@@ -613,7 +613,107 @@ class OliveYoungCollectorCurl:
                 time.sleep(random.uniform(1, 3))
         
         logger.info(f"{len(products)}개 제품의 성분 정보 처리 완료")
-    
+
+    def collect_rankings(self, category_id, target_goods, sort_type=None):
+        """
+        카테고리 페이지에서 특정 상품들(target_goods)의 순위만 수집
+
+        Args:
+            category_id (str): 카테고리 ID
+            target_goods (set): 순위를 찾을 상품 번호(goodsNo) 집합
+            sort_type (str, optional): 정렬 방식
+                                      None: 인기도 순(기본값)
+                                      '03': 판매량 순
+
+        Returns:
+            dict: {goods_no: rank} 형태의 순위 정보 딕셔너리
+                 카테고리가 비어있을 경우 {'category_empty': True} 반환
+        """
+        logger.info(f"카테고리 {category_id}에서 {len(target_goods)}개 상품의 순위 수집 시작 (정렬: {sort_type or '인기도 순'})")
+
+        try:
+            # 결과 초기화
+            rankings = {}
+            found_goods = set()  # 이미 찾은 상품들
+            per_page = 48  # 한 페이지당 상품 수
+
+            # 카테고리 URL 구성
+            sort_param = f"&prdSort={sort_type}" if sort_type else ""
+            category_url = f"{OLIVEYOUNG_CATEGORY_URL}{category_id}&rowsPerPage={per_page}{sort_param}"
+            logger.debug(f"카테고리 URL: {category_url}")
+
+            # Referer 헤더 추가
+            headers = self.headers.copy()
+            headers['Referer'] = f"{OLIVEYOUNG_BASE_URL}/store/main/main.do"
+
+            # 첫 페이지 요청 (재시도 로직 적용)
+            response = self._retry_request(
+                lambda: self._get_with_delay(category_url, headers=headers, timeout=REQUEST_TIMEOUT)
+            )
+            if not response.ok:
+                logger.error(f"카테고리 페이지 접근 실패: {response.status_code}")
+                return {}
+
+            # 카테고리 상품 개수 확인
+            product_count = OliveYoungParser.check_category_product_count(response.text)
+            if product_count == 0:
+                logger.warning(f"카테고리 {category_id}에 등록된 상품이 없습니다.")
+                # 카테고리 비어있음을 알리는 특수 반환값 사용
+                return {'category_empty': True}
+
+            # 전체 페이지 수 확인
+            total_pages = OliveYoungParser.get_total_pages(response.text)
+            logger.info(f"전체 페이지 수: {total_pages}")
+
+            # 모든 페이지 처리
+            for page in range(1, total_pages + 1):
+                logger.info(f"페이지 {page}/{total_pages} 처리 중... (현재까지 찾은 상품: {len(found_goods)}/{len(target_goods)})")
+
+                # 페이지 URL 구성 (첫 페이지는 이미 요청함)
+                if page > 1:
+                    page_url = f"{category_url}&pageIdx={page}"
+                    # Referer를 이전 페이지로 설정
+                    headers['Referer'] = category_url if page == 2 else f"{category_url}&pageIdx={page-1}"
+
+                    response = self._retry_request(
+                        lambda: self._get_with_delay(page_url, headers=headers, timeout=REQUEST_TIMEOUT)
+                    )
+                    if not response.ok:
+                        logger.error(f"페이지 {page} 접근 실패: {response.status_code}")
+                        continue
+
+                # OliveYoungParser를 사용하여 상품 목록 파싱
+                goods_no_list = OliveYoungParser.parse_product_list(response.text)
+
+                # 파싱된 결과에서 target_goods에 포함된 상품 확인 및 순위 계산
+                for idx, goods_no in enumerate(goods_no_list, 1):
+                    if goods_no and goods_no in target_goods and goods_no not in found_goods:
+                        # 순위 계산: (현재 페이지 - 1) * 페이지당 상품 수 + 페이지 내 인덱스
+                        rank = (page - 1) * per_page + idx
+                        rankings[goods_no] = rank
+                        found_goods.add(goods_no)
+                        logger.info(f"상품 {goods_no}의 순위 발견: {rank} (페이지 {page}, 위치 {idx})")
+
+                # 모든 대상 상품을 찾았으면 탐색 중단
+                if len(found_goods) >= len(target_goods):
+                    logger.info(f"모든 대상 상품({len(target_goods)}개)의 순위를 찾았습니다. 탐색 종료.")
+                    break
+
+                # 과도한 요청 방지를 위한 지연
+                time.sleep(random.uniform(3, 5))
+
+            # 찾지 못한 상품 기록
+            not_found = target_goods - found_goods
+            if not_found:
+                logger.warning(f"다음 상품들의 순위를 찾지 못했습니다: {not_found}")
+
+            logger.info(f"카테고리 {category_id}에서 총 {len(rankings)}/{len(target_goods)}개 상품의 순위를 찾았습니다.")
+            return rankings
+
+        except Exception as e:
+            logger.error(f"순위 수집 중 오류 발생: {str(e)}")
+            return {}
+
     def collect_from_category(self, category_id, category_name=None):
         """
         카테고리 페이지에서 제품 정보 수집 (순차 처리)
@@ -734,7 +834,89 @@ class OliveYoungCollectorCurl:
                 'saved_products': 0,
                 'error': str(e)
             }
-    
+
+    def collect_and_save_single_product(self, goods_no, disp_cat_no, year, week_of_year, rankings=None, brandId=None):
+        """
+        단일 제품 정보를 수집하고 시계열 데이터 테이블에 저장
+
+        Args:
+            goods_no (str): 상품 번호
+            disp_cat_no (str): 카테고리 번호
+            year (int): 저장할 연도
+            week_of_year (int): 저장할 주차
+            rankings (dict, optional): 제품의 순위 정보 {'popularity_rank': x, 'sales_rank': y}
+            brandId (int, optional): 이전에 저장된 브랜드 ID 값
+
+        Returns:
+            str/bool: 'deleted' - 상품이 삭제됨, True - 성공, False - 실패
+        """
+        try:
+            logger.info(f"단일 제품 수집 시작: {goods_no} (카테고리: {disp_cat_no})")
+
+            # 1. 제품 상세 정보 수집
+            product_result = self.collect_product_detail(goods_no)
+
+            # 삭제된 제품 처리 (collect_product_detail에서 'deleted' 문자열 반환 시)
+            if product_result == 'deleted':
+                return 'deleted'
+
+            # 수집 실패 처리
+            if not product_result:
+                logger.error(f"제품 {goods_no} 상세 정보 수집 실패")
+                return False
+
+            # 제품 정보 할당
+            product = product_result
+
+            # 2. disp_cat_no 설정 (제공된 카테고리 ID 사용)
+            product['disp_cat_no'] = disp_cat_no
+
+            # 2-1. brandId 설정 (이전 주차의 값이 제공된 경우)
+            if brandId is not None:
+                product['brandId'] = brandId
+                logger.info(f"제품 {goods_no}에 기존 브랜드 ID 적용: {brandId}")
+
+            # 3. 인기도 순위와 판매 순위 설정 (rankings 파라미터 활용)
+            if rankings:
+                product['popularity_rank'] = rankings.get('popularity_rank')
+                product['sales_rank'] = rankings.get('sales_rank')
+                logger.info(f"제품 {goods_no}에 순위 정보 적용: 인기도={product['popularity_rank']}, 판매량={product['sales_rank']}")
+            else:
+                # 순위 정보가 없는 경우 None으로 설정
+                product['popularity_rank'] = None
+                product['sales_rank'] = None
+
+            # 4. 성분 정보 수집 및 분석
+            item_no = product.get('item_no', '001')
+            self.enrich_product_with_ingredients(product, item_no)
+
+            # 5. 시계열 데이터 테이블에 저장을 위한 추가 정보 설정
+            # 중요: 명시적으로 제공된 year와 week_of_year 사용
+            collection_date = datetime.now()  # 수집 시간(현재)
+            month = collection_date.month      # 월
+
+            products_batch = [product]
+
+            # 전처리 및 저장 (저장 전용 API 호출, 시계열 데이터만 저장)
+            # year와 week_of_year 명시적 전달 (동기식 메서드 사용)
+            saved = self.product_api.save_products(
+                products_batch,
+                save_to_history=True,
+                target_year=year,
+                target_week=week_of_year
+            )
+
+            if saved.get('status') == 'success':
+                logger.info(f"제품 {goods_no} 정보 저장 성공")
+                return True
+            else:
+                logger.error(f"제품 {goods_no} 정보 저장 실패: {saved.get('message')}")
+                return False
+
+        except Exception as e:
+            logger.error(f"제품 {goods_no} 수집 및 저장 중 오류 발생: {str(e)}")
+            return False
+
     def close(self):
         """세션 종료"""
         self.session.close()

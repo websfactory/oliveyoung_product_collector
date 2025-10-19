@@ -8,7 +8,8 @@ import sys
 import logging
 from datetime import datetime
 from config.session import CosmeticsSession
-from collectors.oliveyoung_collector import OliveYoungCollector
+# Cloudflare Bot Management 우회를 위해 curl-cffi 버전 사용
+from collectors.oliveyoung_collector_curl import OliveYoungCollectorCurl
 from api.ingredient_api import IngredientAPI
 from api.product_api import ProductAPI
 from retry.manager import RetryManager
@@ -27,9 +28,9 @@ def retry_missing_products():
     # API 클라이언트 초기화
     ingredient_api = IngredientAPI()
     product_api = ProductAPI()
-    
-    # 수집기 초기화
-    collector = OliveYoungCollector(ingredient_api, product_api)
+
+    # 수집기 초기화 (curl-cffi 버전, Cloudflare 우회)
+    collector = OliveYoungCollectorCurl(ingredient_api, product_api, use_proxy=False)
     
     # DB 세션 생성
     session = CosmeticsSession()
