@@ -182,7 +182,7 @@ class OliveYoungCollectorCurl:
         response = self.session.get(url, headers=headers, **kwargs)
         
         # Cloudflare 또는 서버 오류 확인
-        if response.status_code in [403, 503, 405]:
+        if response.status_code in [403, 502, 503, 405]:
             error_msg = f"Cloudflare 챌린지 실패 또는 서버 오류 (HTTP {response.status_code}): {url}"
             logger.error(error_msg)
             
