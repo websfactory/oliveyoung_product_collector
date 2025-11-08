@@ -52,12 +52,20 @@ class RetryManager:
             missing_products = find_missing_products(
                 self.session, previous_year, previous_week, current_year, current_week
             )
-            
+
+            # 11자리 상위 카테고리 제외 (더 이상 수집하지 않는 카테고리)
+            original_count = len(missing_products)
+            missing_products = [p for p in missing_products if len(p['disp_cat_no']) != 11]
+            filtered_count = original_count - len(missing_products)
+
+            if filtered_count > 0:
+                logger.info(f"11자리 상위 카테고리 제품 {filtered_count}개 제외됨")
+
             # 결과를 메모리 맵에 저장 (goods_no, disp_cat_no)를 키로 사용하여 효율적 조회 지원
             self.missing_product_details_map = {
                 (p['goods_no'], p['disp_cat_no']): p for p in missing_products
             }
-            
+
             if not missing_products:
                 logger.info("지난 주 대비 누락된 제품이 없습니다.")
                 return {"success": True, "success_count": 0, "fail_count": 0, "message": "누락된 제품 없음"}
