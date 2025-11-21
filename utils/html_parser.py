@@ -176,56 +176,105 @@ class OliveYoungParser:
     def parse_meta_info(html_content):
         """
         메타 태그에서 제품 정보 추출 (프론트엔드와 동일한 방식)
-        
+        메타 태그가 없을 경우 script JSON에서 추출
+
         Args:
             html_content (str): HTML 컨텐츠
-            
+
         Returns:
             dict: 추출된 메타 정보
         """
         soup = BeautifulSoup(html_content, 'html.parser')
         meta_info = {}
-        
+
         # 프론트엔드와 동일한 getMetaContent 함수 구현
         def get_meta_content(property_name):
             meta_tag = soup.select_one(f'meta[property="eg:{property_name}"]')
             return meta_tag.get('content', '').strip() if meta_tag else ""
-        
+
         # 가격 형식화 함수 (프론트엔드의 formatPrice와 동일)
         def format_price(price_str):
             if not price_str:
                 return ""
-            
+
             # 숫자만 추출
             number_only = re.sub(r'[^\d]', '', price_str)
-            
+
             # 숫자가 아닌 경우 빈 문자열 반환
             if not number_only:
                 return ""
-            
+
             # 천단위 콤마 적용
             return "{:,}".format(int(number_only))
-        
-        # 기본 정보 설정
+
+        # 1. 기존 메타 태그 방식 시도
         meta_info['brand'] = get_meta_content("brandName")
         meta_info['name'] = get_meta_content("itemName")
         meta_info['disp_cat_no'] = get_meta_content("category3")
-        
+
         # 이미지 URL 처리 (프론트엔드와 동일)
         image_url = get_meta_content("itemImage")
         if image_url:
             meta_info['image_url'] = image_url if image_url.startswith("http") else f"https://image.oliveyoung.co.kr/uploads/images/goods/{image_url}"
-            
-        
+
+
         # 가격 정보 설정 (프론트엔드와 동일)
         original_price = get_meta_content("originalPrice")
         sale_price = get_meta_content("salePrice")
-        
+
         meta_info['price'] = {
             'original': format_price(original_price),
             'current': format_price(sale_price or original_price)  # 할인가가 없으면 원가 사용
         }
-        
+
+        # 2. 메타 태그가 없으면 script JSON에서 파싱
+        if not meta_info.get('brand') or not meta_info.get('name'):
+            logger.debug("메타 태그가 없음. script JSON에서 파싱 시도")
+
+            # script 태그들 확인
+            scripts = soup.find_all('script')
+            for script in scripts:
+                if script.string and 'salePrice' in script.string:
+                    script_text = script.string
+
+                    # 브랜드명 추출
+                    brand_match = re.search(r'onlineBrandName\\":\\"([^"]+)\\"', script_text)
+                    if brand_match:
+                        meta_info['brand'] = brand_match.group(1)
+
+                    # 상품명 추출
+                    name_match = re.search(r'goodsName\\":\\"([^"]+)\\"', script_text)
+                    if name_match:
+                        meta_info['name'] = name_match.group(1)
+
+                    # 카테고리 추출
+                    if not meta_info.get('disp_cat_no'):
+                        cat_match = re.search(r'lowerCategory\\":\\"([^"]+)\\"', script_text)
+                        if cat_match:
+                            meta_info['disp_cat_no'] = cat_match.group(1)
+
+                    # 이미지 URL 추출 (없는 경우에만)
+                    if not meta_info.get('image_url'):
+                        img_match = re.search(r'thumbnailImage.*?url\\":\\"([^"]+)\\".*?path\\":\\"([^"]+)\\"', script_text, re.DOTALL)
+                        if img_match:
+                            meta_info['image_url'] = f"{img_match.group(1)}/{img_match.group(2)}"
+
+                    # 가격 추출 (없는 경우에만)
+                    if not meta_info.get('price') or not meta_info['price'].get('original'):
+                        sale_price_match = re.search(r'salePrice\\":(\d+)', script_text)
+                        final_price_match = re.search(r'finalPrice\\":(\d+)', script_text)
+
+                        if sale_price_match and final_price_match:
+                            meta_info['price'] = {
+                                'original': format_price(sale_price_match.group(1)),
+                                'current': format_price(final_price_match.group(1))
+                            }
+
+                    # 데이터를 찾았으면 종료
+                    if meta_info.get('brand') and meta_info.get('name'):
+                        logger.debug(f"script JSON에서 파싱 성공: brand={meta_info['brand']}, name={meta_info['name'][:30]}...")
+                        break
+
         return meta_info
     
     @staticmethod

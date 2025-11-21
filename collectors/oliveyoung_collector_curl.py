@@ -1,6 +1,7 @@
 import os
 import time
 import random
+import json
 from datetime import datetime
 from curl_cffi import requests
 from requests.cookies import create_cookie
@@ -416,9 +417,12 @@ class OliveYoungCollectorCurl:
             meta_info = OliveYoungParser.parse_meta_info(html)
             product_info.update(meta_info)
 
-            # 상세 페이지에서 평점 텍스트, 평점 퍼센트, 리뷰수
-            detail_info = OliveYoungParser.parse_product_info(html)
-            product_info.update(detail_info)
+            # 리뷰 및 평점 정보 수집 (모바일 API 사용)
+            review_info = self.fetch_review_info(goods_no)
+            if review_info:
+                product_info.update(review_info)
+            else:
+                logger.debug(f"제품 {goods_no}의 리뷰 정보를 가져오지 못했습니다")
 
             product_info['product_url'] = detail_url
             
@@ -593,6 +597,74 @@ class OliveYoungCollectorCurl:
         except Exception as e:
             logger.error(f"성분 정보 수집 중 오류: {str(e)}")
             return None
+
+    def fetch_review_info(self, goods_no):
+        """
+        모바일 API를 통해 리뷰 및 평점 정보 수집
+
+        Args:
+            goods_no (str): 상품 번호
+
+        Returns:
+            dict: 리뷰 및 평점 정보 또는 빈 딕셔너리
+        """
+        try:
+            logger.debug(f"리뷰 정보 수집 시작: {goods_no}")
+
+            # 모바일 API URL (데스크톱 도메인은 404 에러)
+            review_url = f"https://m.oliveyoung.co.kr/review/api/v2/reviews/{goods_no}/stats"
+
+            # 헤더 설정
+            headers = self.headers.copy()
+            headers['Referer'] = f"{OLIVEYOUNG_BASE_URL}/goods/getGoodsDetail.do?goodsNo={goods_no}"
+
+            # GET 요청 (재시도 로직 추가)
+            response = self._retry_request(
+                lambda: self._get_with_delay(review_url, headers=headers, timeout=REQUEST_TIMEOUT)
+            )
+
+            if response.status_code != 200:
+                logger.warning(f"리뷰 정보 API 호출 실패: {response.status_code}")
+                return {}
+
+            # JSON 파싱
+            import json
+            review_data = json.loads(response.text)
+
+            if review_data.get('status') != 'SUCCESS':
+                logger.warning(f"리뷰 정보 API 응답 실패: {review_data.get('message')}")
+                return {}
+
+            # 데이터 추출
+            data = review_data.get('data', {})
+            review_count = data.get('reviewCount')
+            average_rating = data.get('ratingDistribution', {}).get('averageRating')
+
+            if review_count is None and average_rating is None:
+                logger.warning(f"제품 {goods_no}의 리뷰 정보가 없습니다")
+                return {}
+
+            # 결과 구성 (기존 format과 동일)
+            result = {}
+
+            # 리뷰 수
+            if review_count is not None:
+                result['review_count'] = str(review_count)
+
+            # 평점 정보
+            if average_rating is not None:
+                rating_percent = (average_rating / 5) * 100  # 5점 만점을 100점 만점으로 변환
+                result['rating'] = {
+                    'text': str(average_rating),
+                    'percent': f"{rating_percent:.1f}"
+                }
+
+            logger.info(f"리뷰 정보 수집 완료: 리뷰 {review_count}개, 평점 {average_rating}")
+            return result
+
+        except Exception as e:
+            logger.error(f"리뷰 정보 수집 중 오류: {str(e)}")
+            return {}
     
     def process_ingredients_batch(self, products):
         """
