@@ -8,16 +8,9 @@ from sqlalchemy.exc import OperationalError, SQLAlchemyError
 
 from config.session import CosmeticsSession
 from models.database import CosmeticsCategory
-# Collector 선택 (기본: curl-cffi 버전)
-# VS Code 디버그 모드에서는 직접 수정하여 사용
-USE_CURL_CFFI = True  # True: curl-cffi 버전, False: 기존 cloudscraper 버전
-
-if USE_CURL_CFFI:
-    from collectors.oliveyoung_collector_curl import OliveYoungCollectorCurl as OliveYoungCollector
-    print("[INFO] curl-cffi 수집기 사용")
-else:
-    from collectors.oliveyoung_collector import OliveYoungCollector
-    print("[INFO] 기본 수집기 사용")
+# Collector 선택 (curl-cffi 버전 고정)
+from collectors.oliveyoung_collector_curl import OliveYoungCollectorCurl as OliveYoungCollector
+print("[INFO] curl-cffi 수집기 사용")
 from api.ingredient_api import IngredientAPI
 from api.product_api import ProductAPI
 from utils.logger import setup_logger

@@ -278,69 +278,6 @@ class OliveYoungParser:
         return meta_info
     
     @staticmethod
-    def parse_product_info(html_content):
-        """
-        상세 페이지에서 제품 정보 추출
-        
-        Args:
-            html_content (str): HTML 컨텐츠
-            
-        Returns:
-            dict: 평점 텍스트, 평점 퍼센트, 리뷰수
-        """
-        soup = BeautifulSoup(html_content, 'html.parser')
-        product_info = {}
-        
-        # 리뷰 정보
-        try:
-            # 리뷰 텍스트 (평점) 추출
-            rating_text_selectors = [
-                "#repReview b",  # 상세 페이지
-            ]
-            
-            rating_text = ""
-            rating_percent = ""
-            
-            for selector in rating_text_selectors:
-                rating_text_element = soup.select_one(selector)
-                if rating_text_element:
-                    rating_text = rating_text_element.text.strip()
-                    
-                    # 5점 만점을 100점 만점으로 변환 (프론트엔드와 동일하게)
-                    try:
-                        rating_value = float(rating_text)
-                        rating_percent = ((rating_value / 5) * 100)
-                        rating_percent = f"{rating_percent:.1f}"  # 소수점 첫째 자리까지 표시
-                    except (ValueError, TypeError):
-                        rating_percent = ""
-                    
-                    break
-            
-            # rating 딕셔너리 구조만 생성 (중복 필드 제거)
-            if rating_percent or rating_text:
-                product_info['rating'] = {
-                    'percent': rating_percent,
-                    'text': rating_text
-                }
-            
-            # 리뷰 수 추출 (이 부분은 유지)
-            review_count_selectors = [
-                "#repReview em",  # 상세 페이지
-            ]
-            
-            for selector in review_count_selectors:
-                review_count = soup.select_one(selector)
-                if review_count:
-                    count_text = review_count.text.strip()
-                    product_info['review_count'] = count_text.replace('(', '').replace(')', '')
-                    break
-                    
-        except Exception as e:
-            logger.warning(f"리뷰 정보 추출 실패: {str(e)}")
-                                
-        return product_info
-        
-    @staticmethod
     def check_category_product_count(html_content):
         """
         카테고리 내 상품 개수 확인
