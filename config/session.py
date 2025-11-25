@@ -4,9 +4,9 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-# .env 파일 로드
+# .env 파일 로드 (시스템 환경변수보다 .env 파일 우선)
 BASE_DIR = Path(__file__).resolve().parent.parent
-load_dotenv(BASE_DIR / '.env')
+load_dotenv(BASE_DIR / '.env', override=True)
 
 # 데이터베이스 설정
 HOSTNAME = os.getenv('HOSTNAME')
