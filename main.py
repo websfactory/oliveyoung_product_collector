@@ -168,19 +168,20 @@ def process_category(collector, category, session, failed_categories=None):
 def select_proxy_mode():
     """
     프록시 사용 여부 선택 메뉴
-    
+
     Returns:
-        bool: 프록시 사용 여부
+        bool 또는 str: 프록시 사용 여부(bool) 또는 'single'(단일 상품 수집 모드)
     """
     print("\n=== 올리브영 수집기 설정 ===")
     print("1. 로컬 연결 사용 (기본)")
     print("2. Webshare 프록시 사용")
     print("3. 프록시 연결 테스트")
+    print("4. 단일 상품 수집")
     print("0. 종료")
-    
+
     while True:
-        choice = input("\n옵션을 선택하세요 (0-3): ").strip()
-        
+        choice = input("\n옵션을 선택하세요 (0-4): ").strip()
+
         if choice == '0':
             print("프로그램을 종료합니다.")
             sys.exit(0)
@@ -194,6 +195,8 @@ def select_proxy_mode():
             test_proxy_connection()
             # 테스트 후 다시 메뉴 표시
             continue
+        elif choice == '4':
+            return 'single'
         else:
             print("\n[ERROR] 잘못된 선택입니다. 다시 선택해주세요.")
 
@@ -393,6 +396,112 @@ def collect_today_categories(use_proxy=False):
         logger.info(f"총 실행 시간: {duration}")
         logger.info("올리브영 제품 수집 프로그램 종료")
 
+def collect_single_product():
+    """
+    단일 상품 수집 모드
+    사용자로부터 goods_no와 disp_cat_no를 입력받아 해당 상품만 수집하고 DB에 저장
+    """
+    print("\n=== 단일 상품 수집 ===")
+
+    # 사용자 입력 받기
+    goods_no = input("상품번호(goods_no)를 입력하세요: ").strip()
+    if not goods_no:
+        print("[ERROR] 상품번호가 입력되지 않았습니다.")
+        return
+
+    disp_cat_no = input("카테고리번호(disp_cat_no)를 입력하세요: ").strip()
+    if not disp_cat_no:
+        print("[ERROR] 카테고리번호가 입력되지 않았습니다.")
+        return
+
+    # 프록시 사용 여부 확인
+    use_proxy_input = input("프록시를 사용하시겠습니까? (y/N): ").strip().lower()
+    use_proxy = use_proxy_input == 'y'
+
+    print(f"\n[INFO] 수집 시작: goods_no={goods_no}, disp_cat_no={disp_cat_no}")
+    print(f"[INFO] 프록시 사용: {'Yes' if use_proxy else 'No'}")
+
+    logger.info(f"단일 상품 수집 시작: goods_no={goods_no}, disp_cat_no={disp_cat_no}")
+    start_time = datetime.now()
+
+    # API 클라이언트 초기화
+    ingredient_api = IngredientAPI()
+    product_api = ProductAPI()
+
+    # 수집기 초기화
+    try:
+        collector = OliveYoungCollector(ingredient_api, product_api, use_proxy=use_proxy)
+        print(f"[INFO] 수집기 초기화 완료")
+    except Exception as e:
+        print(f"[ERROR] 수집기 초기화 실패: {str(e)}")
+        logger.error(f"수집기 초기화 실패: {str(e)}")
+        return
+
+    try:
+        # 1. 상품 상세 정보 수집
+        print("[INFO] 상품 상세 정보 수집 중...")
+        product = collector.collect_product_detail(goods_no)
+
+        if not product:
+            print(f"[ERROR] 상품 {goods_no} 상세 정보 수집 실패")
+            logger.error(f"상품 {goods_no} 상세 정보 수집 실패")
+            return
+
+        if product == 'deleted':
+            print(f"[WARN] 상품 {goods_no}은(는) 삭제되었거나 존재하지 않습니다.")
+            logger.warning(f"상품 {goods_no}은(는) 삭제됨")
+            return
+
+        print(f"[INFO] 상품 상세 정보 수집 완료: {product.get('name', 'N/A')}")
+
+        # 2. 카테고리 번호 설정
+        product['disp_cat_no'] = disp_cat_no
+
+        # 3. 순위 정보 (단일 수집이므로 None)
+        product['popularity_rank'] = None
+        product['sales_rank'] = None
+
+        # 4. 성분 정보 수집
+        print("[INFO] 성분 정보 수집 중...")
+        item_no = product.get('item_no', '001')
+        collector.enrich_product_with_ingredients(product, item_no)
+        print("[INFO] 성분 정보 수집 완료")
+
+        # 5. DB 저장 (API + History 테이블)
+        print("[INFO] DB 저장 중...")
+        products_batch = [product]
+
+        result = product_api.save_products(products_batch, save_to_history=True)
+
+        if result.get('status') == 'success':
+            print("[INFO] DB 저장 완료!")
+            logger.info(f"단일 상품 {goods_no} 저장 성공")
+        else:
+            print(f"[ERROR] DB 저장 실패: {result.get('message')}")
+            logger.error(f"단일 상품 {goods_no} 저장 실패: {result.get('message')}")
+
+        # 결과 요약 출력
+        print("\n=== 수집 결과 ===")
+        print(f"상품번호: {goods_no}")
+        print(f"상품명: {product.get('name', 'N/A')}")
+        print(f"브랜드: {product.get('brand', 'N/A')}")
+        print(f"가격: {product.get('price', {}).get('current', 'N/A')}원")
+        print(f"평점: {product.get('rating', {}).get('text', 'N/A')}")
+        print(f"리뷰수: {product.get('review_count', 'N/A')}")
+
+    except Exception as e:
+        print(f"[ERROR] 수집 중 오류 발생: {str(e)}")
+        logger.error(f"단일 상품 수집 중 오류: {str(e)}")
+    finally:
+        collector.close()
+
+        # 실행 시간 계산
+        end_time = datetime.now()
+        duration = end_time - start_time
+        print(f"\n총 실행 시간: {duration}")
+        logger.info(f"단일 상품 수집 종료. 실행 시간: {duration}")
+
+
 def reset_category_status():
     """
     모든 카테고리의 처리 상태 초기화 (선택적 사용)
@@ -464,8 +573,13 @@ if __name__ == "__main__":
                 sys.exit(1)
         else:
             # 인터랙티브 모드 - 사용자가 선택
-            use_proxy = select_proxy_mode()
-            collect_today_categories(use_proxy=use_proxy)
+            mode = select_proxy_mode()
+            if mode == 'single':
+                # 단일 상품 수집 모드
+                collect_single_product()
+            else:
+                # 카테고리 전체 수집 모드
+                collect_today_categories(use_proxy=mode)
     except KeyboardInterrupt:
         logger.info("사용자에 의해 프로그램 중단")
     except Exception as e:
