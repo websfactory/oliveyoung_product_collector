@@ -364,13 +364,14 @@ class OliveYoungCollectorCurl:
             logger.error(f"상품 번호 수집 중 오류 발생: {str(e)}")
             return []
     
-    def collect_product_detail(self, goods_no):
+    def collect_product_detail(self, goods_no, skip_review=False):
         """
         상품 상세 페이지에서 제품 정보 수집
-        
+
         Args:
             goods_no (str): 상품 번호
-            
+            skip_review (bool): 리뷰 API 호출 건너뛰기 (판매여부 확인만 할 때 True)
+
         Returns:
             dict/str: 수집된 제품 정보 또는 'deleted' (제품이 삭제된 경우)
         """
@@ -418,11 +419,13 @@ class OliveYoungCollectorCurl:
             product_info.update(meta_info)
 
             # 리뷰 및 평점 정보 수집 (모바일 API 사용)
-            review_info = self.fetch_review_info(goods_no)
-            if review_info:
-                product_info.update(review_info)
-            else:
-                logger.debug(f"제품 {goods_no}의 리뷰 정보를 가져오지 못했습니다")
+            # skip_review=True면 리뷰 API 호출 건너뜀 (판매여부 확인만 할 때)
+            if not skip_review:
+                review_info = self.fetch_review_info(goods_no)
+                if review_info:
+                    product_info.update(review_info)
+                else:
+                    logger.debug(f"제품 {goods_no}의 리뷰 정보를 가져오지 못했습니다")
 
             product_info['product_url'] = detail_url
             

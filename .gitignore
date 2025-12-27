@@ -4,5 +4,6 @@ __pycache__/
 .vscode/
 reports/
 error_logs/
+deleted_check_reports/
 new_cookies_setting_code.txt
 .claude
