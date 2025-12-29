@@ -32,20 +32,30 @@ class RetryManager:
         self.missing_product_details_map = {}  # 누락된 제품 정보를 저장할 맵 (메모리 효율화)
         logger.info("RetryManager 초기화 완료")
     
-    def process_missing_products(self):
+    def process_missing_products(self, override_year=None, override_week=None):
         """
         누락된 제품들을 찾아 재수집 프로세스를 실행
-        
+
+        Args:
+            override_year (int, optional): 주차를 오버라이드할 연도 (현재 주차 대신 사용)
+            override_week (int, optional): 주차를 오버라이드할 주차 번호 (현재 주차 대신 사용)
+
         Returns:
             dict: 처리 결과
         """
         logger.info("누락된 제품 처리 시작")
-        
+
         try:
-            # 1. 현재 주차 및 이전 주차 계산
-            current_year, current_week = get_current_iso_week()
+            # 1. 현재 주차 및 이전 주차 계산 (오버라이드 가능)
+            if override_year and override_week:
+                # 오버라이드된 주차를 현재 주차로 사용
+                current_year, current_week = override_year, override_week
+                logger.info(f"주차 오버라이드 적용: {current_year}년 {current_week}주차를 현재 주차로 사용")
+            else:
+                current_year, current_week = get_current_iso_week()
+
             previous_year, previous_week = get_previous_iso_week(current_year, current_week)
-            
+
             logger.info(f"처리 대상 주차: {current_year}년 {current_week}주차 (이전 주차: {previous_year}년 {previous_week}주차)")
             
             # 2. 누락된 제품 목록 조회
