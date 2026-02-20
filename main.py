@@ -229,20 +229,24 @@ def test_proxy_connection():
     
     input("\n계속하려면 Enter키를 누르세요...")
 
-def collect_today_categories(use_proxy=False):
+def collect_today_categories(use_proxy=False, target_day=None):
     """
     오늘 작업할 카테고리 수집 실행
-    
+
     Args:
         use_proxy (bool): 프록시 사용 여부
+        target_day (int, optional): 특정 요일 지정 (1=월 ~ 7=일). None이면 오늘 요일 사용
     """
     logger.info("올리브영 제품 수집 프로그램 시작")
     logger.info(f"프록시 사용: {'Yes' if use_proxy else 'No'}")
     start_time = datetime.now()
-    
-    # 오늘 요일 계산 (1~7: 월~일)
-    today_weekday = datetime.now().isoweekday()
-    logger.info(f"오늘 요일: {today_weekday} ({['월', '화', '수', '목', '금', '토', '일'][today_weekday-1]}요일)")
+
+    # 요일 결정: target_day가 지정되면 해당 요일, 아니면 오늘 요일 (1~7: 월~일)
+    today_weekday = target_day if target_day else datetime.now().isoweekday()
+    if target_day:
+        logger.info(f"지정 요일: {today_weekday} ({['월', '화', '수', '목', '금', '토', '일'][today_weekday-1]}요일)")
+    else:
+        logger.info(f"오늘 요일: {today_weekday} ({['월', '화', '수', '목', '금', '토', '일'][today_weekday-1]}요일)")
     
     # API 클라이언트 초기화
     ingredient_api = IngredientAPI()
@@ -563,12 +567,27 @@ if __name__ == "__main__":
                 # 커맨드라인에서 로컬 사용 지정
                 print("[INFO] 커맨드라인 옵션: 로컬 연결")
                 collect_today_categories(use_proxy=False)
+            elif sys.argv[1] == "--day":
+                # 특정 요일 지정 실행 (예: python main.py --day 4)
+                if len(sys.argv) < 3:
+                    print("[ERROR] 요일 번호를 입력하세요. (1=월 ~ 7=일)")
+                    sys.exit(1)
+                target_day = int(sys.argv[2])
+                if target_day < 1 or target_day > 7:
+                    print("[ERROR] 요일 번호는 1~7 사이여야 합니다. (1=월 ~ 7=일)")
+                    sys.exit(1)
+                day_names = ['월', '화', '수', '목', '금', '토', '일']
+                print(f"[INFO] 커맨드라인 옵션: {day_names[target_day-1]}요일({target_day}) 카테고리 수집")
+                # --proxy 추가 옵션 확인
+                use_proxy = "--proxy" in sys.argv[3:]
+                collect_today_categories(use_proxy=use_proxy, target_day=target_day)
             else:
                 print(f"[ERROR] 알 수 없는 옵션: {sys.argv[1]}")
                 print("\n사용법:")
                 print("  python main.py              # 인터랙티브 모드")
                 print("  python main.py --local      # 로컬 연결 사용")
                 print("  python main.py --proxy      # 프록시 사용")
+                print("  python main.py --day 4      # 특정 요일 카테고리 수집 (1=월 ~ 7=일)")
                 print("  python main.py --reset      # 카테고리 상태 초기화")
                 sys.exit(1)
         else:
