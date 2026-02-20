@@ -177,10 +177,11 @@ def select_proxy_mode():
     print("2. Webshare 프록시 사용")
     print("3. 프록시 연결 테스트")
     print("4. 단일 상품 수집")
+    print("5. 특정 요일 카테고리 수집")
     print("0. 종료")
 
     while True:
-        choice = input("\n옵션을 선택하세요 (0-4): ").strip()
+        choice = input("\n옵션을 선택하세요 (0-5): ").strip()
 
         if choice == '0':
             print("프로그램을 종료합니다.")
@@ -197,6 +198,8 @@ def select_proxy_mode():
             continue
         elif choice == '4':
             return 'single'
+        elif choice == '5':
+            return 'day'
         else:
             print("\n[ERROR] 잘못된 선택입니다. 다시 선택해주세요.")
 
@@ -596,6 +599,22 @@ if __name__ == "__main__":
             if mode == 'single':
                 # 단일 상품 수집 모드
                 collect_single_product()
+            elif mode == 'day':
+                # 특정 요일 수집 모드
+                day_names = ['월', '화', '수', '목', '금', '토', '일']
+                print("\n=== 특정 요일 카테고리 수집 ===")
+                for i, name in enumerate(day_names, 1):
+                    print(f"  {i}. {name}요일")
+                target_day = input("\n요일 번호를 입력하세요 (1=월 ~ 7=일): ").strip()
+                try:
+                    target_day = int(target_day)
+                    if target_day < 1 or target_day > 7:
+                        print("[ERROR] 요일 번호는 1~7 사이여야 합니다.")
+                    else:
+                        print(f"\n[INFO] {day_names[target_day-1]}요일({target_day}) 카테고리 수집을 시작합니다.")
+                        collect_today_categories(use_proxy=False, target_day=target_day)
+                except ValueError:
+                    print("[ERROR] 숫자를 입력해주세요.")
             else:
                 # 카테고리 전체 수집 모드
                 collect_today_categories(use_proxy=mode)
