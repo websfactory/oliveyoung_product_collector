@@ -4,6 +4,13 @@ from utils.logger import setup_logger
 logger = setup_logger(__name__, "product_preprocessor.log")
 
 
+def clean_image_url(url):
+    """이미지 확장자 뒤 쿼리스트링 제거 (예: ?l=ko)"""
+    if not isinstance(url, str):
+        return url
+    return re.sub(r'(\.(jpe?g|png|gif|webp))\?.*$', r'\1', url, flags=re.IGNORECASE)
+
+
 def decode_unicode_escapes(text):
     r"""
     유니코드 이스케이프 시퀀스(\uXXXX)를 실제 문자로 변환합니다.
@@ -85,13 +92,17 @@ def preprocess_product_data(products):
         try:
             goods_no = product.get('goods_no')
 
-            # 1. 문자열 필드 유니코드 이스케이프 디코딩 (\u0026 → & 등)
+            # 1. 이미지 URL 쿼리스트링 제거 (CDN이 붙이는 ?l=ko 등 방어)
+            if product.get('image_url'):
+                product['image_url'] = clean_image_url(product['image_url'])
+
+            # 2. 문자열 필드 유니코드 이스케이프 디코딩 (\u0026 → & 등)
             if 'name' in product and product['name']:
                 product['name'] = decode_unicode_escapes(product['name'])
             if 'brand' in product and product['brand']:
                 product['brand'] = decode_unicode_escapes(product['brand'])
 
-            # 2. price 객체 내부 값 처리 (문자열 → 정수)
+            # 3. price 객체 내부 값 처리 (문자열 → 정수)
             if product.get('price'):
                 # price.original 처리
                 if product['price'].get('original') is not None:
@@ -105,7 +116,7 @@ def preprocess_product_data(products):
                         product['price']['current'], 'price.current', goods_no
                     )
             
-            # 3. rating 객체 내부 값 처리 (문자열 → 소수점)
+            # 4. rating 객체 내부 값 처리 (문자열 → 소수점)
             if product.get('rating'):
                 # rating.text 처리
                 if product['rating'].get('text') is not None:
@@ -119,7 +130,7 @@ def preprocess_product_data(products):
                         product['rating']['percent'], 'rating.percent', goods_no
                     )
             
-            # 4. review_count 처리 ("559건" → 559)
+            # 5. review_count 처리 ("559건" → 559)
             if product.get('review_count') is not None:
                 product['review_count'] = safe_convert_to_int(
                     product['review_count'], 'review_count', goods_no
