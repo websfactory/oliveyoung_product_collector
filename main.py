@@ -273,7 +273,13 @@ def collect_today_categories(use_proxy=False, target_day=None):
     
     # 실패한 카테고리 목록 초기화
     failed_categories = []
-    
+
+    # 수집 요약 (텔레그램 보고용) — finally에서 참조하므로 try 이전에 초기화
+    success_count = 0
+    total_products = 0
+    total_categories = 0
+    crashed = False
+
     # DB 세션 생성
     session = CosmeticsSession()
     
@@ -379,16 +385,18 @@ def collect_today_categories(use_proxy=False, target_day=None):
                 save_error_log(failed_categories)
         
         # 결과 요약
+        total_categories = len(categories)
         success_count = sum(1 for r in results if r.get('success', False))
         total_products = sum(r.get('collected_products', 0) for r in results if r.get('success', False))
-        
-        logger.info(f"작업 완료: {success_count}/{len(categories)} 카테고리 성공, {len(failed_categories)}개 실패, 총 {total_products}개 제품 수집")
+
+        logger.info(f"작업 완료: {success_count}/{total_categories} 카테고리 성공, {len(failed_categories)}개 실패, 총 {total_products}개 제품 수집")
         
         # 남은 실패 목록 저장
         if failed_categories:
             save_error_log(failed_categories)
             
     except Exception as e:
+        crashed = True
         logger.error(f"작업 중 오류 발생: {str(e)}")
         # 진행 중이던 작업 정보 저장
         if failed_categories:
@@ -402,6 +410,58 @@ def collect_today_categories(use_proxy=False, target_day=None):
         duration = end_time - start_time
         logger.info(f"총 실행 시간: {duration}")
         logger.info("올리브영 제품 수집 프로그램 종료")
+
+        # 상태 판정 (임계치 가드: 0건/급감 = alert → 침묵 실패 차단)
+        note_parts = []
+        if crashed:
+            run_status = 'failed'
+            note_parts.append('수집 중 예외 발생')
+        elif total_categories == 0:
+            run_status = 'alert'
+            note_parts.append('처리할 카테고리 0개 (주간 리셋 누락 또는 재실행?)')
+        elif total_products == 0:
+            run_status = 'alert'
+            note_parts.append('수집 0건')
+        else:
+            run_status = 'partial' if failed_categories else 'success'
+            try:
+                from utils.run_log import last_week_collected
+                lw = last_week_collected('oliveyoung')
+                if lw and lw >= 100 and total_products < lw * 0.4:
+                    run_status = 'alert'
+                    note_parts.append(f'전주 동요일 대비 급감: {total_products} vs {lw}')
+            except Exception as e:
+                logger.error(f"전주 비교 실패: {str(e)}")
+        if failed_categories:
+            note_parts.append('실패 카테고리: ' + ', '.join(
+                str(c.get('category_name', c.get('category_id', '?'))) for c in failed_categories[:10]))
+        run_note = ' / '.join(note_parts) if note_parts else None
+
+        # collection_runs 기록 (관측 중앙화)
+        try:
+            from utils.run_log import record_run
+            record_run(
+                site='oliveyoung', job_type='collect',
+                started_at=start_time, finished_at=end_time, status=run_status,
+                scheduled_day=today_weekday, category_count=total_categories,
+                collected_count=total_products, failed_count=len(failed_categories),
+                note=run_note,
+            )
+        except Exception as e:
+            logger.error(f"collection_runs 기록 실패: {str(e)}")
+
+        # 수집 완주 텔레그램 보고 (상태 반영, 전송 실패가 수집에 영향 주지 않도록 격리)
+        try:
+            from utils.telegram import send_collection_report
+            send_collection_report(
+                weekday=today_weekday, status=run_status,
+                success_count=success_count, total_categories=total_categories,
+                total_products=total_products, failed_categories=failed_categories,
+                duration=duration,
+                extra_note=(run_note if run_status in ('alert', 'failed') else None),
+            )
+        except Exception as e:
+            logger.error(f"텔레그램 수집 보고 전송 실패: {str(e)}")
 
 def collect_single_product():
     """

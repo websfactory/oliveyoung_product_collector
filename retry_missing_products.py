@@ -54,6 +54,14 @@ def retry_missing_products(target_year=None, target_week=None):
     # DB 세션 생성
     session = CosmeticsSession()
 
+    # 요약 (텔레그램/collection_runs 보고용) — finally에서 참조하므로 try 이전에 초기화
+    result = None
+    success_count = 0
+    fail_count = 0
+    deleted_count = 0
+    total_count = 0
+    crashed = False
+
     try:
         # 재시도 관리자 초기화
         retry_manager = RetryManager(collector, session)
@@ -77,18 +85,54 @@ def retry_missing_products(target_year=None, target_week=None):
             logger.error(f"누락 제품 처리 실패: {result.get('message')}")
             
     except Exception as e:
+        crashed = True
         logger.error(f"누락 제품 재시도 처리 중 예외 발생: {str(e)}", exc_info=True)
-        
+
     finally:
         # 세션 및 수집기 종료
         session.close()
         collector.close()
-        
+
         # 실행 시간 계산
         end_time = datetime.now()
         duration = end_time - start_time
         logger.info(f"총 실행 시간: {duration}")
         logger.info("누락된 제품 재수집 프로그램 종료")
+
+        # 상태 판정
+        if crashed or not (result and result.get('success')):
+            retry_status = 'failed'
+            note = (result.get('message') if result else '재시도 중 예외 발생')
+        elif total_count == 0:
+            retry_status = 'success'
+            note = '재수집할 누락 제품 없음'
+        elif fail_count > 0:
+            retry_status = 'partial'
+            note = f'성공 {success_count} / 실패 {fail_count} / 삭제 {deleted_count}'
+        else:
+            retry_status = 'success'
+            note = f'성공 {success_count} / 삭제 {deleted_count}'
+
+        # collection_runs 기록 (관측 중앙화)
+        try:
+            from utils.run_log import record_run
+            record_run(
+                site='oliveyoung', job_type='retry',
+                started_at=start_time, finished_at=end_time, status=retry_status,
+                collected_count=success_count, failed_count=fail_count, note=note,
+            )
+        except Exception as e:
+            logger.error(f"collection_runs 기록 실패: {str(e)}")
+
+        # 텔레그램 완주 보고 (전송 실패가 재수집에 영향 주지 않도록 격리)
+        try:
+            from utils.telegram import send_retry_report
+            send_retry_report(
+                total_retried=total_count, success_count=success_count,
+                fail_count=fail_count, duration=duration, extra=note,
+            )
+        except Exception as e:
+            logger.error(f"텔레그램 재수집 보고 전송 실패: {str(e)}")
 
 def parse_arguments():
     """
