@@ -5,6 +5,7 @@
 전송 실패가 수집 자체에 영향을 주지 않도록 모든 예외를 내부에서 흡수한다.
 """
 import os
+import time
 from datetime import timedelta
 
 import requests
@@ -23,20 +24,23 @@ def send_telegram(text: str) -> bool:
     if not token or not chat_id:
         logger.warning("TELEGRAM_BOT_TOKEN/CHAT_ID 미설정 — 텔레그램 전송 생략")
         return False
-    try:
-        resp = requests.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            data={'chat_id': chat_id, 'text': text},
-            timeout=15,
-        )
-        if resp.status_code == 200 and resp.json().get('ok'):
-            logger.info("텔레그램 전송 성공")
-            return True
-        logger.error(f"텔레그램 전송 실패: {resp.status_code} {resp.text[:200]}")
-        return False
-    except Exception as e:
-        logger.error(f"텔레그램 전송 예외: {e}")
-        return False
+    # 일시적 네트워크 오류(Connection reset 등)로 보고를 놓치지 않도록 최대 3회 재시도
+    for attempt in range(3):
+        try:
+            resp = requests.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                data={'chat_id': chat_id, 'text': text},
+                timeout=15,
+            )
+            if resp.status_code == 200 and resp.json().get('ok'):
+                logger.info("텔레그램 전송 성공")
+                return True
+            logger.error(f"텔레그램 전송 실패: {resp.status_code} {resp.text[:200]}")
+        except Exception as e:
+            logger.error(f"텔레그램 전송 예외(시도 {attempt + 1}/3): {e}")
+        if attempt < 2:
+            time.sleep(2)
+    return False
 
 
 def _fmt_duration(duration) -> str:
